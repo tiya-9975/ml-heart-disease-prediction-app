@@ -14,7 +14,7 @@ from sklearn.preprocessing import StandardScaler
 # ===============================
 # Load Models
 # ===============================
-MODELS_DIR = os.path.join(os.path.dirname(__file__), "../models")
+MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 
 models = {}
 if os.path.exists(MODELS_DIR):
@@ -189,4 +189,7 @@ if uploaded_file is not None:
     best_model = results_df.loc[results_df["Accuracy"].idxmax()]
     st.success(f"🏆 Best Model Based on Accuracy: **{best_model['Model']}** "
                f"(Accuracy: {best_model['Accuracy']:.2f})")
+    
+
+    
 
