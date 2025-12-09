@@ -1,195 +1,280 @@
+"""
+Heart Disease Risk Checker
+Production-grade Streamlit app with ML evaluation
+"""
 
 import streamlit as st
 import pandas as pd
 import joblib
-import os
-import numpy as np
-import plotly.express as px
-from sklearn.metrics import (
-    accuracy_score, precision_score, recall_score,
-    f1_score, roc_auc_score, confusion_matrix, roc_curve
+from pathlib import Path
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# ================== CONFIG ==================
+NUM_FEATURES = ['age', 'trestbps', 'chol', 'thalach', 'oldpeak']
+CAT_FEATURES = ['sex', 'cp', 'fbs', 'restecg', 'exang', 'slope', 'ca', 'thal']
+
+st.set_page_config(
+    page_title="Heart Disease Risk Checker",
+    page_icon="❤️",
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
-from sklearn.preprocessing import StandardScaler
 
-# ===============================
-# Load Models
-# ===============================
-MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
+# ================== CSS ==================
+st.markdown("""
+<style>
+/* Headings */
+.main-header {
+    font-size: 2.8rem;
+    font-weight: 700;
+    text-align: center;
+    color: #ef4444;
+}
+.sub-header {
+    text-align: center;
+    color: #9ca3af;
+    font-size: 1.1rem;
+    margin-bottom: 2rem;
+}
 
-models = {}
-if os.path.exists(MODELS_DIR):
-    for filename in os.listdir(MODELS_DIR):
-        if filename.endswith(".joblib"):
-            model_name = filename.replace(".joblib", "")
-            models[model_name] = joblib.load(os.path.join(MODELS_DIR, filename))
-else:
-    st.error("⚠️ No models folder found at ../models. Please check your paths.")
+/* Landing card */
+.hero-box {
+    background: #0f172a;   /* dark slate */
+    border: 1px solid #1f2937;
+    border-radius: 14px;
+    padding: 1.8rem;
+    color: #e5e7eb;        /* ✅ force text color */
+}
+.hero-box h4 {
+    color: #f9fafb;
+}
+.hero-box ul li {
+    color: #d1d5db;
+}
+.hero-box p {
+    color: #d1d5db;
+}
 
-# ===============================
-# Preprocessing Function
-# ===============================
-def preprocess_input(df):
-    categorical_cols = ['sex', 'cp', 'fbs', 'restecg', 'exang', 'slope', 'ca', 'thal']
-    num_cols = ['age', 'trestbps', 'chol', 'thalach', 'oldpeak']
+/* Disclaimer */
+.disclaimer {
+    background-color: #020617;
+    color: #e5e7eb;
+    padding: 1.2rem;
+    border-left: 5px solid #f59e0b;
+    margin: 1.5rem 0;
+}
 
-    # Convert categorical columns to string
-    for col in categorical_cols:
-        df[col] = df[col].astype(str)
+/* Risk cards */
+.risk-box {
+    padding: 2rem;
+    border-radius: 14px;
+    text-align: center;
+    margin-top: 1.5rem;
+}
+.risk-low {
+    background-color: #052e16;
+    border: 2px solid #22c55e;
+    color: #dcfce7;
+}
+.risk-medium {
+    background-color: #451a03;
+    border: 2px solid #f59e0b;
+    color: #fffbeb;
+}
+.risk-high {
+    background-color: #450a0a;
+    border: 2px solid #ef4444;
+    color: #fee2e2;
+}
+.risk-box h1, .risk-box h2, .risk-box p {
+    color: inherit !important;
+}
 
-    # One-hot encoding
-    df_encoded = pd.get_dummies(df, columns=categorical_cols)
+/* Section titles */
+.section-title {
+    font-size: 1.4rem;
+    font-weight: 600;
+    margin-top: 2rem;
+    color: #f9fafb;
+}
+</style>
+""", unsafe_allow_html=True)
 
-    # Scale numerical features
-    scaler = StandardScaler()
-    df_encoded[num_cols] = scaler.fit_transform(df_encoded[num_cols])
 
-    return df_encoded
+# ================== LOAD PIPELINE ==================
+@st.cache_resource
+def load_pipeline():
+    path = Path(__file__).parent / "heart_disease_pipeline.pkl"
+    if not path.exists():
+        st.error("❌ heart_disease_pipeline.pkl not found. Run train_pipeline.py first.")
+        st.stop()
+    return joblib.load(path)
 
-# ===============================
-# Streamlit UI
-# ===============================
-st.title("❤️ Heart Disease Prediction App")
-
-st.sidebar.header("Enter Patient Details")
-
-# Collect user inputs
-age = st.sidebar.number_input("Age", 20, 100, 50)
-sex = st.sidebar.selectbox("Sex", [0, 1])
-cp = st.sidebar.selectbox("Chest Pain Type (cp)", [0, 1, 2, 3])
-trestbps = st.sidebar.number_input("Resting Blood Pressure", 80, 200, 120)
-chol = st.sidebar.number_input("Serum Cholestoral (mg/dl)", 100, 600, 200)
-fbs = st.sidebar.selectbox("Fasting Blood Sugar > 120 mg/dl", [0, 1])
-restecg = st.sidebar.selectbox("Resting ECG Results", [0, 1, 2])
-thalach = st.sidebar.number_input("Maximum Heart Rate Achieved", 70, 220, 150)
-exang = st.sidebar.selectbox("Exercise Induced Angina", [0, 1])
-oldpeak = st.sidebar.number_input("ST Depression", 0.0, 10.0, 1.0, step=0.1)
-slope = st.sidebar.selectbox("Slope of Peak Exercise ST Segment", [0, 1, 2])
-ca = st.sidebar.selectbox("Number of Major Vessels (0-3) colored by fluoroscopy", [0, 1, 2, 3])
-thal = st.sidebar.selectbox("Thal", [0, 1, 2, 3])
-
-# Convert to DataFrame
-features = pd.DataFrame([{
-    "age": age, "sex": sex, "cp": cp, "trestbps": trestbps, "chol": chol,
-    "fbs": fbs, "restecg": restecg, "thalach": thalach, "exang": exang,
-    "oldpeak": oldpeak, "slope": slope, "ca": ca, "thal": thal
-}])
-
-# Preprocess input
-features_processed = preprocess_input(features)
-
-# ===============================
-# Prediction Section
-# ===============================
-if st.button("Predict"):
-    if not models:
-        st.error("No models available!")
+# ================== UTIL ==================
+def risk_bucket(p):
+    if p < 0.3:
+        return "Low", "🟢", "risk-low"
+    elif p < 0.6:
+        return "Medium", "🟡", "risk-medium"
     else:
-        for name, model in models.items():
-            # Align feature columns (fill missing ones with 0)
-            X_input = features_processed.reindex(columns=model.feature_names_in_, fill_value=0)
+        return "High", "🔴", "risk-high"
 
-            # Predict
-            pred = model.predict(X_input)[0]
-            proba = model.predict_proba(X_input)[0, 1] if hasattr(model, "predict_proba") else None
+def safe_name(name):
+    return name.replace(" ", "_")
 
-            st.subheader(f"📌 Model: {name}")
-            st.write("✅ Prediction:", "Heart Disease" if pred == 1 else "No Heart Disease")
-            if proba is not None:
-                st.write(f"🔢 Probability of Heart Disease: {proba:.2f}")
+# ================== PAGES ==================
 
-# ===============================
-# Model Evaluation Section
-# ===============================
-st.header("📊 Model Evaluation & Comparison")
+def landing_page():
+    st.markdown('<p class="main-header">❤️ Heart Disease Risk Checker</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="sub-header">Estimate your heart disease risk using AI in under 2 minutes</p>',
+        unsafe_allow_html=True
+    )
 
-uploaded_file = st.file_uploader("Upload test dataset (CSV)", type=["csv"])
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("""
+        <div class="hero-box">
+            <h4>✅ What this tool does</h4>
+            <ul>
+                <li>Uses machine learning trained on real clinical data</li>
+                <li>Evaluates multiple ML models (RF, SVM, GB, LR, KNN)</li>
+                <li>Explains predictions with ROC curves & confusion matrices</li>
+            </ul>
 
-if uploaded_file is not None:
-    df_test = pd.read_csv(uploaded_file)
+            <h4>⚠️ Important</h4>
+            <p>
+            This tool is for <b>educational and research purposes only</b>.
+            It does NOT replace professional medical advice.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
 
-    # Split features/target
-    X_test_raw = df_test.drop("target", axis=1)
-    y_test = df_test["target"]
+        st.markdown("<br>", unsafe_allow_html=True)
 
-    # Preprocess test data
-    X_test_processed = preprocess_input(X_test_raw)
+        if st.button("🚀 Start Risk Assessment", use_container_width=True):
+            st.session_state.page = "form"
+            st.rerun()
 
-    # Store results for comparison
-    results = []
 
-    for name, model in models.items():
-        st.subheader(f"Model: {name}")
+def assessment_page():
+    st.markdown('<p class="main-header">🩺 Health Assessment</p>', unsafe_allow_html=True)
 
-        X_eval = X_test_processed.reindex(columns=model.feature_names_in_, fill_value=0)
-        y_pred = model.predict(X_eval)
-        y_proba = model.predict_proba(X_eval)[:, 1] if hasattr(model, "predict_proba") else None
+    st.markdown("""
+    <div class="disclaimer">
+    <strong>Medical Disclaimer:</strong>  
+    This AI model provides statistical risk estimates only and is not a medical diagnosis.
+    </div>
+    """, unsafe_allow_html=True)
 
-        # Metrics
-        acc = accuracy_score(y_test, y_pred)
-        prec = precision_score(y_test, y_pred)
-        rec = recall_score(y_test, y_pred)
-        f1 = f1_score(y_test, y_pred)
-        roc_auc = roc_auc_score(y_test, y_proba) if y_proba is not None else None
+    with st.form("health_form"):
+        age = st.slider("Age", 20, 100, 50)
+        sex = st.radio("Sex", ["Male", "Female"])
+        trestbps = st.slider("Resting Blood Pressure (mm Hg)", 90, 200, 120)
+        chol = st.slider("Cholesterol (mg/dL)", 100, 400, 200)
+        thalach = st.slider("Maximum Heart Rate", 60, 220, 150)
+        oldpeak = st.slider("ST Depression", 0.0, 6.0, 0.0)
+        cp = st.selectbox("Chest Pain Type",
+                          ["Typical Angina", "Atypical Angina", "Non-anginal", "Asymptomatic"])
+        exang = st.radio("Exercise Induced Angina", ["No", "Yes"])
+        slope = st.selectbox("ST Slope", ["Upsloping", "Flat", "Downsloping"])
+        ca = st.selectbox("Major Vessels (0–3)", [0, 1, 2, 3])
+        thal = st.selectbox("Thalassemia", ["Normal", "Fixed Defect", "Reversible Defect"])
+        fbs = st.radio("Fasting Blood Sugar > 120", ["No", "Yes"])
+        restecg = st.selectbox("Resting ECG",
+                               ["Normal", "ST-T Abnormality", "LV Hypertrophy"])
 
-        results.append({
-            "Model": name,
-            "Accuracy": acc,
-            "Precision": prec,
-            "Recall": rec,
-            "F1 Score": f1,
-            "ROC AUC": roc_auc if roc_auc else 0
-        })
+        submitted = st.form_submit_button("🔍 Calculate Risk")
 
-        st.write(f"Accuracy: {acc:.2f}")
-        st.write(f"Precision: {prec:.2f}")
-        st.write(f"Recall: {rec:.2f}")
-        st.write(f"F1 Score: {f1:.2f}")
-        if roc_auc:
-            st.write(f"ROC AUC: {roc_auc:.2f}")
+    if submitted:
+        st.session_state.input = {
+            'age': age,
+            'sex': 1 if sex == "Male" else 0,
+            'trestbps': trestbps,
+            'chol': chol,
+            'thalach': thalach,
+            'oldpeak': oldpeak,
+            'cp': ["Typical Angina", "Atypical Angina", "Non-anginal", "Asymptomatic"].index(cp),
+            'exang': 1 if exang == "Yes" else 0,
+            'slope': ["Upsloping", "Flat", "Downsloping"].index(slope),
+            'ca': ca,
+            'thal': ["Normal", "Fixed Defect", "Reversible Defect"].index(thal) + 1,
+            'fbs': 1 if fbs == "Yes" else 0,
+            'restecg': ["Normal", "ST-T Abnormality", "LV Hypertrophy"].index(restecg)
+        }
+        st.session_state.page = "result"
+        st.rerun()
 
-        # Confusion Matrix
-        cm = confusion_matrix(y_test, y_pred)
-        cm_fig = px.imshow(cm, text_auto=True, color_continuous_scale="Blues",
-                           title=f"Confusion Matrix - {name}")
-        st.plotly_chart(cm_fig)
+def result_page():
+    pipeline = load_pipeline()
+    df = pd.DataFrame([st.session_state.input])
 
-        # ROC Curve
-        if y_proba is not None:
-            fpr, tpr, _ = roc_curve(y_test, y_proba)
-            roc_fig = px.area(
-                x=fpr, y=tpr,
-                title=f"ROC Curve - {name}",
-                labels=dict(x="False Positive Rate", y="True Positive Rate"),
-                width=500, height=400
-            )
-            roc_fig.add_shape(
-                type="line", line=dict(dash="dash"),
-                x0=0, x1=1, y0=0, y1=1
-            )
-            st.plotly_chart(roc_fig)
+    prob = pipeline.predict_proba(df)[0, 1]
+    risk, icon, css = risk_bucket(prob)
 
-    # ===============================
-    # Model Comparison Charts
-    # ===============================
-    results_df = pd.DataFrame(results)
-    st.subheader("📊 Model Comparison Overview")
+    st.markdown(f"""
+    <div class="risk-box {css}">
+        <h1>{icon} {risk} Risk</h1>
+        <h2>{prob*100:.1f}% likelihood</h2>
+        <p>Based on your health profile</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    # Bar chart for Accuracy
-    acc_fig = px.bar(results_df, x="Model", y="Accuracy", color="Model",
-                     title="Accuracy Comparison of Models", text_auto=True)
-    st.plotly_chart(acc_fig)
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔁 New Assessment", use_container_width=True):
+            st.session_state.page = "form"
+            st.rerun()
+    with col2:
+        if st.button("📊 ML Model Evaluation", use_container_width=True):
+            st.session_state.page = "ml"
+            st.rerun()
 
-    # Multi-metric chart
-    metrics_df = results_df.melt(id_vars="Model", var_name="Metric", value_name="Score")
-    metrics_fig = px.bar(metrics_df, x="Model", y="Score", color="Metric",
-                         barmode="group", title="Comparison of All Metrics")
-    st.plotly_chart(metrics_fig)
+def ml_page():
+    st.markdown('<p class="main-header">📊 Model Evaluation (ML Scientist View)</p>', unsafe_allow_html=True)
 
-    # Best model suggestion
-    best_model = results_df.loc[results_df["Accuracy"].idxmax()]
-    st.success(f"🏆 Best Model Based on Accuracy: **{best_model['Model']}** "
-               f"(Accuracy: {best_model['Accuracy']:.2f})")
-    
+    df = pd.read_csv("data/model_comparison.csv")
+    st.dataframe(df.style.highlight_max(axis=0))
 
-    
+    best = df.loc[df["ROC_AUC"].idxmax()]
+    st.success(f"🏆 Best Model: {best['Model']} (ROC-AUC = {best['ROC_AUC']:.3f})")
 
+    st.markdown('<p class="section-title">ROC Curve Comparison</p>', unsafe_allow_html=True)
+    roc_data = joblib.load("data/roc_curves.joblib")
+
+    fig, ax = plt.subplots()
+    for model, (fpr, tpr, auc_val) in roc_data.items():
+        ax.plot(fpr, tpr, label=f"{model} (AUC={auc_val:.2f})")
+    ax.plot([0, 1], [0, 1], 'k--')
+    ax.set_xlabel("False Positive Rate")
+    ax.set_ylabel("True Positive Rate")
+    ax.legend()
+    st.pyplot(fig)
+
+    st.markdown('<p class="section-title">Confusion Matrices</p>', unsafe_allow_html=True)
+    cols = st.columns(len(df))
+    for i, name in enumerate(df["Model"]):
+        with cols[i]:
+            cm = joblib.load(f"data/cm_{safe_name(name)}.joblib")
+            fig, ax = plt.subplots()
+            sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=ax)
+            ax.set_title(name, fontsize=10)
+            st.pyplot(fig)
+
+# ================== ROUTER ==================
+def main():
+    if "page" not in st.session_state:
+        st.session_state.page = "landing"
+
+    pages = {
+        "landing": landing_page,
+        "form": assessment_page,
+        "result": result_page,
+        "ml": ml_page
+    }
+
+    pages[st.session_state.page]()
+
+if __name__ == "__main__":
+    main()
